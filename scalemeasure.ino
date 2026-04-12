@@ -1,45 +1,73 @@
-/* 
- Example using the SparkFun HX711 breakout board with a scale
- 
- This example demonstrates basic scale output. See the calibration sketch to get the calibration_factor for your
- specific load cell setup.
-
- This example code uses bogde's excellent library:"https://github.com/bogde/HX711"
- bogde's library is released under a GNU GENERAL PUBLIC LICENSE
-
- The HX711 does one thing well: read load cells. The breakout board is compatible with any wheat-stone bridge
- based load cell which should allow a user to measure everything from a few grams to tens of tons.
- Arduino pin 2 -> HX711 CLK
- 3 -> DAT
- 5V -> VCC
- GND -> GND
-
- The HX711 board can be powered from 2.7V to 5V so the Arduino 5V power should be fine.
-
-*/
-
 #include "HX711.h"
 
-#define calibration_factor -3000.0 //This value is obtained using the SparkFun_HX711_Calibration sketch
+#define LOADCELL_DOUT_PIN   6
+#define LOADCELL_SCK_PIN    5
+#define VREF_MV             20.0
+#define ADC_FULL_SCALE      8388608.0
+#define MEDIAN_SIZE         3
+#define EMA_ALPHA           0.4
+#define CALIBRATION_FACTOR  16.894  // kgs/mV
 
-#define LOADCELL_DOUT_PIN  6 // Pin D6 to DATA
-#define LOADCELL_SCK_PIN  5 // Pin D5 to CLK
 HX711 scale;
+
+// --- Median filter ---
+float medianBuf[MEDIAN_SIZE];
+int   medianIndex = 0;
+bool  medianFull  = false;
+
+float computeMedian() {
+  float sorted[MEDIAN_SIZE];
+  int n = medianFull ? MEDIAN_SIZE : medianIndex;
+  for (int i = 0; i < n; i++) sorted[i] = medianBuf[i];
+  for (int i = 1; i < n; i++) {
+    float key = sorted[i];
+    int j = i - 1;
+    while (j >= 0 && sorted[j] > key) { sorted[j + 1] = sorted[j]; j--; }
+    sorted[j + 1] = key;
+  }
+  return sorted[n / 2];
+}
+
+// --- EMA filter ---
+float emaValue  = 0.0;
+bool  emaSeeded = false;
+
+float computeEMA(float input) {
+  if (!emaSeeded) { emaValue = input; emaSeeded = true; }
+  else emaValue = EMA_ALPHA * input + (1.0 - EMA_ALPHA) * emaValue;
+  return emaValue;
+}
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("HX711 scale demo");
+  Serial.println("HX711 force logger");
+  Serial.println("------------------");
+  Serial.print("Calibration factor: ");
+  Serial.print(CALIBRATION_FACTOR, 3);
+  Serial.println(" kgs/mV");
+  Serial.println();
 
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
-  scale.set_scale(calibration_factor); //This value is obtained by using the SparkFun_HX711_Calibration sketch
-  scale.tare(); //Assuming there is no weight on the scale at start up, reset the scale to 0
+  scale.tare();
 
-  Serial.println("Readings:");
+  Serial.println("Reading:");
 }
 
 void loop() {
+  long  rawADC    = scale.read();
+  float rawMV     = (rawADC / ADC_FULL_SCALE) * VREF_MV;
+
+  medianBuf[medianIndex] = rawMV;
+  medianIndex++;
+  if (medianIndex >= MEDIAN_SIZE) { medianIndex = 0; medianFull = true; }
+  float medianMV = computeMedian();
+
+  if (!emaSeeded) { emaValue = medianMV; emaSeeded = true; }
+  else emaValue = EMA_ALPHA * medianMV + (1.0 - EMA_ALPHA) * emaValue;
+
+  float kgs = emaValue * CALIBRATION_FACTOR;
+
   Serial.print("Reading: ");
-  Serial.print(scale.get_units(), 1); //scale.get_units() returns a float
-  Serial.print(" kgs"); //You can change this to kg but you'll need to refactor the calibration_factor
-  Serial.println();
+  Serial.print(kgs, 3);
+  Serial.println(" kgs");
 }
