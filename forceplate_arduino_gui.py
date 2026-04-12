@@ -10,9 +10,8 @@ import pyqtgraph as pg
 # -----------------------------
 # Configuration
 # -----------------------------
-PLOT_WINDOW = 5.0  # seconds shown in plots
-BAUD_RATE = 9600   # must match Arduino code
-
+PLOT_WINDOW = 5.0   # seconds shown in plots
+BAUD_RATE = 9600    # must match Arduino code
 
 # -----------------------------
 # Serial reader thread
@@ -29,15 +28,12 @@ class SerialReader(QtCore.QThread):
         self.ser = None
 
     def parse_line(self, raw: str):
-        """
-        Supports Arduino output like:
-          1 | 8388608 | 8388000 | 8390000 | 2000
-
-        Also supports old-style:
-          Reading: 12.3 kgs
-        """
         raw = raw.strip()
+        if not raw:
+            return None
 
+        # Format 1:
+        # count|raw|min|max|range
         if "|" in raw:
             parts = [p.strip() for p in raw.split("|")]
             if len(parts) != 5:
@@ -53,11 +49,13 @@ class SerialReader(QtCore.QThread):
             except ValueError:
                 return None
 
+        # Format 2:
+        # Reading: 12.345 kgs
         if "Reading:" in raw:
             try:
-                value_str = raw.split("Reading:")[1].strip().split()[0]
-                raw_value = float(value_str)
-                return 0.0, raw_value, raw_value, raw_value, 0.0
+                value_str = raw.split("Reading:", 1)[1].strip().split()[0]
+                value = float(value_str)
+                return 0.0, value, np.nan, np.nan, np.nan
             except Exception:
                 return None
 
@@ -113,11 +111,11 @@ class SerialReader(QtCore.QThread):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, serial_port: str = None):
         super().__init__()
-        self.setWindowTitle("Force Plate — Live Raw Count")
+        self.setWindowTitle("HX711 Live Reading")
         self.resize(1200, 700)
 
         self.times = deque()
-        self.raw_buffer = deque()
+        self.value_buffer = deque()
 
         self.peak_times = deque()
         self.peak_buffer = deque()
@@ -147,8 +145,8 @@ class MainWindow(QtWidgets.QMainWindow):
         split = QtWidgets.QHBoxLayout()
         plot_widget = pg.GraphicsLayoutWidget()
 
-        # Raw count plot
-        self.plot_raw = plot_widget.addPlot(row=0, col=0, title="HX711 Raw Count")
+        # Live reading plot
+        self.plot_raw = plot_widget.addPlot(row=0, col=0, title="Live Reading")
         self.plot_raw.showGrid(x=True, y=True)
         self.raw_curve = self.plot_raw.plot(pen=pg.mkPen(width=2))
         plot_widget.nextRow()
@@ -158,7 +156,9 @@ class MainWindow(QtWidgets.QMainWindow):
             row=1, col=0, title=f"Rolling Peak (last {PLOT_WINDOW:.0f}s)"
         )
         self.plot_peak.showGrid(x=True, y=True)
-        self.peak_curve = self.plot_peak.plot(pen=pg.mkPen(style=QtCore.Qt.PenStyle.DashLine))
+        self.peak_curve = self.plot_peak.plot(
+            pen=pg.mkPen(width=2, style=QtCore.Qt.PenStyle.DashLine)
+        )
 
         self.session_peak_line = pg.InfiniteLine(
             pos=0,
@@ -174,12 +174,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         right_layout = QtWidgets.QVBoxLayout()
 
-        self.raw_label = QtWidgets.QLabel("Raw Count: 0")
-        self.rolling_peak_label = QtWidgets.QLabel("Rolling Peak: 0")
-        self.session_peak_label_widget = QtWidgets.QLabel("Session Peak: 0")
-        self.min_label = QtWidgets.QLabel("Min: 0")
-        self.max_label = QtWidgets.QLabel("Max: 0")
-        self.range_label = QtWidgets.QLabel("Range: 0")
+        self.raw_label = QtWidgets.QLabel("Reading: 0.000")
+        self.rolling_peak_label = QtWidgets.QLabel("Rolling Peak: 0.000")
+        self.session_peak_label_widget = QtWidgets.QLabel("Session Peak: 0.000")
+        self.min_label = QtWidgets.QLabel("Min: N/A")
+        self.max_label = QtWidgets.QLabel("Max: N/A")
+        self.range_label = QtWidgets.QLabel("Range: N/A")
         self.status_label = QtWidgets.QLabel("Status: disconnected")
 
         right_layout.addWidget(self.raw_label)
@@ -213,14 +213,14 @@ class MainWindow(QtWidgets.QMainWindow):
         t_rel = t - self.t0
 
         self.times.append(t_rel)
-        self.raw_buffer.append(raw_value)
+        self.value_buffer.append(raw_value)
 
         # Keep only the last PLOT_WINDOW seconds
         while self.times and (t_rel - self.times[0] > PLOT_WINDOW):
             self.times.popleft()
-            self.raw_buffer.popleft()
+            self.value_buffer.popleft()
 
-        current_peak = max(self.raw_buffer) if self.raw_buffer else raw_value
+        current_peak = max(self.value_buffer) if self.value_buffer else raw_value
         self.peak_times.append(t_rel)
         self.peak_buffer.append(current_peak)
 
@@ -231,34 +231,48 @@ class MainWindow(QtWidgets.QMainWindow):
         if current_peak > self.session_peak:
             self.session_peak = current_peak
 
-        self.raw_label.setText(f"Raw Count: {raw_value:.0f}")
-        self.min_label.setText(f"Min: {min_value:.0f}")
-        self.max_label.setText(f"Max: {max_value:.0f}")
-        self.range_label.setText(f"Range: {range_value:.0f}")
+        self.raw_label.setText(f"Reading: {raw_value:.3f}")
+
+        if np.isnan(min_value):
+            self.min_label.setText("Min: N/A")
+        else:
+            self.min_label.setText(f"Min: {min_value:.3f}")
+
+        if np.isnan(max_value):
+            self.max_label.setText("Max: N/A")
+        else:
+            self.max_label.setText(f"Max: {max_value:.3f}")
+
+        if np.isnan(range_value):
+            self.range_label.setText("Range: N/A")
+        else:
+            self.range_label.setText(f"Range: {range_value:.3f}")
 
     def update_plots(self):
         if not self.times:
             return
 
         t_arr = np.array(self.times, dtype=float)
-        raw_arr = np.array(self.raw_buffer, dtype=float)
+        value_arr = np.array(self.value_buffer, dtype=float)
         peak_t_arr = np.array(self.peak_times, dtype=float)
         peak_arr = np.array(self.peak_buffer, dtype=float)
 
-        self.raw_curve.setData(t_arr, raw_arr)
+        self.raw_curve.setData(t_arr, value_arr)
         self.peak_curve.setData(peak_t_arr, peak_arr)
 
         self.session_peak_line.setValue(self.session_peak)
 
         try:
             x_pos = peak_t_arr[-1]
-            self.session_peak_label.setText(f"Session peak: {self.session_peak:.0f}")
+            self.session_peak_label.setText(f"Session peak: {self.session_peak:.3f}")
             self.session_peak_label.setPos(x_pos, self.session_peak)
         except Exception:
             pass
 
-        self.rolling_peak_label.setText(f"Rolling Peak ({PLOT_WINDOW:.0f}s): {peak_arr[-1]:.0f}")
-        self.session_peak_label_widget.setText(f"Session Peak: {self.session_peak:.0f}")
+        self.rolling_peak_label.setText(
+            f"Rolling Peak ({PLOT_WINDOW:.0f}s): {peak_arr[-1]:.3f}"
+        )
+        self.session_peak_label_widget.setText(f"Session Peak: {self.session_peak:.3f}")
 
     def closeEvent(self, ev):
         if self.reader:
