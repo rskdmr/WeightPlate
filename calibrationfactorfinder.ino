@@ -4,12 +4,12 @@
 #define LOADCELL_SCK_PIN    5
 #define LOADCELL_DOUT_PIN_2 11
 #define LOADCELL_SCK_PIN_2  12
-#define VREF_MV             20.0
+#define VREF_MV             3300.0
 #define ADC_FULL_SCALE      8388608.0
 #define SETTLE_MS           5000
 #define SAMPLE_MS           10000
 #define MEDIAN_SIZE         3
-#define EMA_ALPHA           0.4
+#define EMA_ALPHA           0.2
 
 HX711 scale;
 HX711 scale2;
