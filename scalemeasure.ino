@@ -10,13 +10,13 @@
 #define SAMPLE_MS           10000
 #define MEDIAN_SIZE         3
 #define EMA_ALPHA           0.2
-#define CALIBRATION_FACTOR  0.0        // kg/mV for left plate  — fill in
+#define CALIBRATION_FACTOR  10.46882786        // kg/mV for left plate  — fill in
 #define CALIBRATION_FACTOR2 9.959421512 // kg/mV for right plate — fill in
 
 HX711 scale;
 HX711 scale2;
 
-float baseline  = 283.0;
+float baseline  = -53.25668594;
 float baseline2 = 14.7521;
 
 // --- Median filter ---
