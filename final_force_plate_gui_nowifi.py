@@ -35,10 +35,12 @@ def auto_detect_port() -> str | None:
     return candidates[0].device if candidates else None
 
 
-def compute_lsi(left: float, right: float, max_diff: float) -> float:
-    if max_diff == 0:
+def compute_lsi(left: float, right: float) -> float:
+    high = max(left, right)
+    low  = min(left, right)
+    if high == 0:
         return 0.0
-    return max(0.0, min(100.0, (left - right) / max_diff * 100.0))
+    return (low / high) * 100.0
 
 
 def rts_status(lsi_val: float) -> tuple[str, str]:
@@ -141,7 +143,6 @@ class DataStore:
         self.session_peak_R   = 0.0
         self.session_peak_sum = 0.0
         self.session_peak_lsi = 0.0
-        self.session_max_diff = 0.0
 
         self.last_count = 0
         self.last_raw_L = 0.0
@@ -149,17 +150,16 @@ class DataStore:
         self.last_sum   = 0.0
         self.last_lsi   = 0.0
 
+        self.peak_sum_L = 0.0
+        self.peak_sum_R = 0.0
+
     def ingest(self, count: int, raw_L: float, raw_R: float):
         t = time.time()
         if self.t0 is None:
             self.t0 = t
         t_rel = t - self.t0
 
-        diff = raw_L - raw_R
-        if diff > self.session_max_diff:
-            self.session_max_diff = diff
-
-        lsi_val = compute_lsi(raw_L, raw_R, self.session_max_diff)
+        lsi_val = compute_lsi(raw_L, raw_R)
         total   = raw_L + raw_R
 
         self.times.append(t_rel)
@@ -181,7 +181,11 @@ class DataStore:
         if raw_L   > self.session_peak_L:   self.session_peak_L   = raw_L
         if raw_R   > self.session_peak_R:   self.session_peak_R   = raw_R
         if total   > self.session_peak_sum: self.session_peak_sum = total
-        if lsi_val > self.session_peak_lsi: self.session_peak_lsi = lsi_val
+        if total > self.session_peak_sum:
+         self.session_peak_sum = total
+         self.peak_sum_L = raw_L  
+         self.peak_sum_R = raw_R
+
 
         self.last_count = count
         self.last_raw_L = raw_L
@@ -198,6 +202,9 @@ class DataStore:
             writer.writerow([f"{v:.4f}" for v in row])
         return buf.getvalue().encode("utf-8")
 
+@property
+def peak_lsi(self) -> float:
+    return compute_lsi(self.peak_sum_L, self.peak_sum_R)
 
 # =====================================================================
 # Clinician Dashboard
