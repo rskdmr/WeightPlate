@@ -161,10 +161,13 @@ class DataStore:
                         self.sum_buf, self.lsi_buf):
                 buf.popleft()
 
-        if raw_L   > self.session_peak_L:   self.session_peak_L   = raw_L
-        if raw_R   > self.session_peak_R:   self.session_peak_R   = raw_R
-        if total   > self.session_peak_sum: self.session_peak_sum = total
-        if lsi_val > self.session_peak_lsi: self.session_peak_lsi = lsi_val
+        if raw_L   > self.session_peak_L:   
+                self.session_peak_L   = raw_L
+        if raw_R   > self.session_peak_R:   
+                self.session_peak_R   = raw_R
+        if total   > self.session_peak_sum: 
+            self.session_peak_sum = total
+            self.session_peak_lsi = lsi_val
 
         self.last_count = count
         self.last_raw_L = raw_L
