@@ -3,7 +3,7 @@
 
 // --- WIFI ---
 const char* ssid     = "DRB351"; // insert wifi name
-const char* password = ""; // password
+const char* password = "bmethernet"; // password
 WiFiServer server(80);
 WiFiClient client;
 
